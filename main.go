@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"strings"
 
@@ -14,12 +15,8 @@ import (
 
 const (
 	s3BucketName = "your-s3-bucket-name"
-	s3ObjectName = "nytimes-feed.xml"
+	s3ObjectName = "nytimes-feed.csv"
 )
-
-func formatAuthor(author string) string {
-	return strings.TrimSpace(strings.Trim(author, "&{}"))
-}
 
 func saveToS3(data []byte) error {
 	// Create a new AWS session using your credentials
@@ -46,7 +43,7 @@ func saveToS3(data []byte) error {
 
 func fetchAndSaveFeed() {
 	fp := gofeed.NewParser()
-	feed, err := fp.ParseURL("https://www.nytimes.com/svc/collections/v1/publish/http://www.nytimes.com/topic/subject/agriculture-and-farming/rss.xml")
+	feed, err := fp.ParseURL("https://www.thehindubusinessline.com/economy/agri-business/feeder/default.rss")
 	if err != nil {
 		fmt.Println("Error fetching the feed:", err)
 		return
@@ -56,27 +53,42 @@ func fetchAndSaveFeed() {
 		return
 	}
 
-	for _, post := range feed.Items {
-		author := formatAuthor(post.Author.Name)
-		fmt.Println("Title:", post.Title)
-		fmt.Println("Link:", post.Link)
-		fmt.Println("Description:", post.Description)
-		fmt.Println("Author:", author)
-		fmt.Println("----")
-	}
-
-	feedContent := ""
-	if feed != nil {
-		feedContent = fmt.Sprintf("%#v", feed)
-	}
-
-	err = saveToS3([]byte(feedContent))
+	csvData := convertToCSV(feed)
+	err = saveToS3([]byte(csvData))
 	if err != nil {
-		fmt.Println("error in saving s3:", err)
+		fmt.Println("Error saving to S3:", err)
 		return
 	}
 
-	fmt.Println("feed savedin s3 successfully.")
+	fmt.Println("Feed data saved to S3 successfully.")
+}
+
+func convertToCSV(feed *gofeed.Feed) string {
+	var csvRows [][]string
+
+	header := []string{"Title", "Link", "Description", "Author"}
+	csvRows = append(csvRows, header)
+
+	// Data rows
+	for _, post := range feed.Items {
+
+		// Add data to the CSV row
+		row := []string{
+			post.Title,
+			post.Link,
+			post.Description,
+			post.Published,
+		}
+		csvRows = append(csvRows, row)
+	}
+
+	// Convert to CSV string
+	var csvData strings.Builder
+	w := csv.NewWriter(&csvData)
+	w.WriteAll(csvRows)
+	w.Flush()
+
+	return csvData.String()
 }
 
 func main() {
@@ -84,6 +96,6 @@ func main() {
 	c := cron.New()
 	c.AddFunc("*/30 * * * * *", fetchAndSaveFeed)
 	c.Start()
-	// fetchAndSaveFeed()
+	fetchAndSaveFeed()
 	select {}
 }
